@@ -1,12 +1,13 @@
 (ns autolajout.core
     (:require cljsjs.autolayout
+              [clojure.walk :as walk]
               [rum.core :as rum]
               [cljs.pprint :refer [pprint]]))
 
 (enable-console-print!)
 
 (defn parse
-  ([layout] (parse layout {:extended false}))
+  ([layout] (parse layout {:extended true}))
   ([layout options]
    (js/AutoLayout.VisualFormat.parse (clj->js layout) (clj->js options))))
 
@@ -35,7 +36,7 @@
    :fitting-width (.-fittingWidth view)
    :height (.-height view)
    :width (.-width view)
-   :subviews (into {} (map (fn [k] [(keyword k) (subview->clj (aget (.-subViews view) k))]) (.keys js/Object (.-subViews view))))})
+   :subviews (into {} (map (fn [k] [k (subview->clj (aget (.-subViews view) k))]) (.keys js/Object (.-subViews view))))})
 
 (defn ->view
   [layout width height spacing extended?]
@@ -63,35 +64,40 @@
                          (transform-attr "-o-transform"))))
 
 (defn set-absolute-size-and-position
-  [element {:keys [width height left top] :as subview}]
-  (.setAttribute element "style" (str "width: " width "px; "
-                                      "height: " height "px; "
-                                      tranform-attr ":" " translate3d(" left "px, " top "px, 0px);")))
+  [id subview]
+  (when-let [element (.getElementById js/document id)]
+    (set! (.-className element) (if (.-className element) (str (.-className element) " abs") "abs"))
+    (let [width (.-width subview)
+          height (.-height subview)
+          left (.-left subview)
+          top (.-top subview)]
+      (println id left top width height)
+      (.setAttribute element "style" (str "width: " width "px; "
+                                          "height: " height "px; "
+                                          tranform-attr ":" " translate3d(" left "px, " top "px, 0px);")))))
 
-(defn auto-layout
-  [layout parent-id]
-  (let [parent-element (.getElementById js/document parent-id)
-        v (js/AutoLayout.View.)
-        constraints (parse layout {:extended true})
-        _ (.addConstraints v constraints)
-        view (view->clj v)
-        elements (into {}
-                       (for [[id subview] (:subviews view)]
-                         (let [element (.getElementById js/document (name id))]
-                           (when element
-                             (set! (.-className element) (if (.-className element) (str (.-className element) " abs") "abs"))
-                             [id element]))))
-        update-layout (fn []
-                        (let [width (if parent-element (.-clientWidth parent-element) (.-innerWidth js/window))
-                              height (if parent-element (.-clientHeight parent-element) (.-innerHeight js/window))
-                              _ (.setSize v width height)
-                              view (view->clj v)]
-                          (doseq [[id element] elements]
-                            (let [subview (-> view :subviews id)]
-                              (set-absolute-size-and-position element subview)))))]
-    (.addEventListener js/window "resize" update-layout)
-    (update-layout)
-    update-layout))
+(defn build-views
+  [view]
+  (walk/postwalk (fn [x]
+                   (if (and (vector? x) (every? string? x))
+                     (let [constraints (parse x)
+                           view (js/AutoLayout.View.)]
+                       (.addConstraints view constraints)
+                       view)
+                     x))
+                 view))
+
+(defn layout-view
+  [view width height]
+  (println "VIEW" width height view)
+  (let [v (:layout view)]
+    (.setSize v width height)
+    (doseq [[id subview] (map (fn [k] [k (aget (.-subViews v) k)]) (.keys js/Object (.-subViews v)))]
+      (println id (get-in view [:subviews]))
+      (set-absolute-size-and-position id (aget (.-subViews v) id))
+      (when-let [sv (get-in view [:subviews (keyword id)])]
+        (layout-view sv (.-width subview) (.-height subview))))))
+
 
 (def vfl ["|-[child1(child3)]-[child3]-|"
           "|-[child2(child4)]-[child4]-|"
@@ -105,7 +111,7 @@
 
 (rum/defc app [vfl evfl]
   [:div
-   [:div {:id "left"}
+   [:div {:id :left}
     [:div {:id "text"} "autolajout DOM Example"]
     [:pre {:id "vfl"} (clojure.string/join "\n" vfl)]
     [:div {:id "text2"} "Same example written in EVFL"]
@@ -118,15 +124,26 @@
     [:div {:id "child5"} [:div "child5"]]]])
 
 (rum/mount (app vfl evfl) (js/document.getElementById "app"))
-(auto-layout ["|-[left(right)]-[right]-|"
-              "V:|-[left]-|"
-              "V:|-[right]-|"]
-             "app")
-(auto-layout ["V:|-[col:[text(20)]-[vfl(evfl)]-[text2(text)]-[evfl]]-|"
-              "|-[col]-|"]
-             "left")
-(auto-layout evfl "right")
+#_(auto-layout ["|-[left(right)]-[right]-|"
+                "V:|-[left]-|"
+                "V:|-[right]-|"]
+               "app")
+#_(auto-layout ["V:|-[col:[text(20)]-[vfl(evfl)]-[text2(text)]-[evfl]]-|"
+                "|-[col]-|"]
+               "left")
+#_(auto-layout evfl "right")
 
+(def view {:layout   ["|-[left(right)]-[right]-|"
+                      "V:|-[left]-|"
+                      "V:|-[right]-|"]
+           :subviews {:left  {:layout ["V:|-[col:[text(20)]-[vfl(evfl)]-[text2(text)]-[evfl]]-|"
+                                       "|-[col]-|"]}
+                      :right {:layout evfl}}})
+
+(def views (build-views view))
+(layout-view  views (.-innerWidth js/window) (.-innerHeight js/window))
+
+(.addEventListener js/window "resize" #(layout-view  views (.-innerWidth js/window) (.-innerHeight js/window)))
 ;; define your app data so that it doesn't get over-written on reload
 
 (defonce app-state (atom {:text "Hello world!"}))
