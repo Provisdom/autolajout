@@ -16,7 +16,7 @@ html, body {
   margin: 0;
 }
 
-#right > div {
+.child {
   border: 1px solid #DDDDDD;
   border-radius: 5px;
   background-color: #CCCCCC;
@@ -24,7 +24,7 @@ html, body {
   color: #666666;
 }
 
-#right > div > div {
+.child-label {
   position: relative;
   top: 50%;
   -webkit-transform: translateY(-50%);

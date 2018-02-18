@@ -64,17 +64,15 @@
                           (transform-attr "-o-transform"))))
 
 (defn set-absolute-size-and-position
-  [id subview]
-  (when-let [element (.getElementById js/document id)]
-    (set! (.-className element) (if (.-className element) (str (.-className element) " abs") "abs"))
-    (let [width (.-width subview)
-          height (.-height subview)
-          left (.-left subview)
-          top (.-top subview)]
-      (println id left top width height)
-      (.setAttribute element "style" (str "width: " width "px; "
-                                          "height: " height "px; "
-                                          transform-attr ":" " translate3d(" left "px, " top "px, 0px);")))))
+  [element subview]
+  (set! (.-className element) (clojure.string/join " " (conj (set (filter not-empty (clojure.string/split (.-className element) #" "))) "abs")))
+  (let [width (.-width subview)
+        height (.-height subview)
+        left (.-left subview)
+        top (.-top subview)]
+    (.setAttribute element "style" (str "width: " width "px; "
+                                        "height: " height "px; "
+                                        transform-attr ":" " translate(" left "px, " top "px);"))))
 
 (defn build-views
   [view]
@@ -88,15 +86,15 @@
                  view))
 
 (defn layout-view
-  [view width height]
-  (println "VIEW" width height view)
+  [view view-element width height]
   (let [v (:layout view)]
     (.setSize v width height)
     (doseq [[id subview] (map (fn [k] [k (aget (.-subViews v) k)]) (.keys js/Object (.-subViews v)))]
-      (println id (get-in view [:subviews]))
-      (set-absolute-size-and-position id (aget (.-subViews v) id))
-      (when-let [sv (get-in view [:subviews (keyword id)])]
-        (layout-view sv (.-width subview) (.-height subview))))))
+      (when-not (= "_" (first id))
+        (when-let [view-element (.querySelector view-element (str "#" id))]
+          (set-absolute-size-and-position view-element subview)
+          (when-let [sv (get-in view [:subviews (keyword id)])]
+            (layout-view sv view-element (.-clientWidth view-element) #_(.-width subview) (.-clientHeight view-element) #_(.-height subview))))))))
 
 
 (def vfl ["|-[child1(child3)]-[child3]-|"
@@ -116,26 +114,28 @@
     [:pre {:id :vfl} (clojure.string/join "\n" vfl)]
     [:div {:id :text2} "Same example written in EVFL"]
     [:pre {:id :evfl} (clojure.string/join "\n" evfl)]]
+   [:div {:id :middle}
+    (for [n (range 1 6)]
+      [:div.child {:id (str "child" n)} [:div.child-label (str "child" n)]])]
    [:div {:id :right}
-    [:div {:id :child1} [:div "child1"]]
-    [:div {:id :child2} [:div "child2"]]
-    [:div {:id :child3} [:div "child3"]]
-    [:div {:id :child4} [:div "child4"]]
-    [:div {:id :child5} [:div "child5"]]]])
+    (for [n (range 1 6)]
+      [:div.child {:id (str "child" n)} [:div.child-label (str "child" n)]])]])
 
 (rum/mount (app vfl evfl) (js/document.getElementById "app"))
 
-(def view {:layout   ["|-[left(right)]-[right]-|"
+(def view {:layout   ["|-[left(right,middle)]-[middle]-[right]-|"
                       "V:|-[left]-|"
+                      "V:|-[middle]-|"
                       "V:|-[right]-|"]
-           :subviews {:left  {:layout ["V:|-[col:[text(20)]-[vfl(evfl)]-[text2(text)]-[evfl]]-|"
-                                       "|-[col]-|"]}
-                      :right {:layout evfl}}})
+           :subviews {:left   {:layout ["V:|-[col:[text(20)]-[vfl(evfl)]-[text2(text)]-[evfl]]-|"
+                                        "|-[col]-|"]}
+                      :middle {:layout evfl}
+                      :right  {:layout evfl}}})
 
 (def views (build-views view))
-(layout-view views (.-innerWidth js/window) (.-innerHeight js/window))
+(layout-view views js/document (.-innerWidth js/window) (.-innerHeight js/window))
 
-(.addEventListener js/window "resize" #(layout-view views (.-innerWidth js/window) (.-innerHeight js/window)))
+(.addEventListener js/window "resize" #(layout-view views js/document (.-innerWidth js/window) (.-innerHeight js/window)))
 ;; define your app data so that it doesn't get over-written on reload
 
 (defonce app-state (atom {:text "Hello world!"}))
